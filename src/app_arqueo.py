@@ -49,7 +49,7 @@ if 'prolog' not in st.session_state:
 # 2. CARGAR DATOS (MDT)
 @st.cache_resource
 def obtener_datos_estables():
-    ruta = os.path.join("..", "datos", "mdt", "MDT02-ETRS89-HU29-0982-3-COB2.tif")
+    ruta = os.path.join(os.getcwd(), "datos", "mdt", "MDT02-ETRS89-HU29-0982-3-COB2.tif")
     if not os.path.exists(ruta):
         st.error(f"No se encuentra el archivo: {ruta}")
         st.stop()
