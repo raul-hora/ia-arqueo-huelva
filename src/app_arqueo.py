@@ -11,6 +11,17 @@ try:
     from pyswip import Prolog
 except ImportError:
     st.error("Error crítico: No se ha podido cargar el motor de Prolog.")
+
+    # --- CARGA DEL MOTOR ---
+if 'prolog' not in st.session_state:
+    st.session_state.prolog = Prolog()
+    # Usamos ruta relativa al archivo actual
+    ruta_motor = os.path.join(os.path.dirname(__file__), "motor.pl")
+    
+    if os.path.exists(ruta_motor):
+        st.session_state.prolog.consult(ruta_motor)
+    else:
+        st.error(f"¡Cuidado! No encuentro el archivo motor.pl en {ruta_motor}")
 from streamlit_folium import st_folium
 import folium
 from folium.plugins import MarkerCluster
@@ -60,7 +71,12 @@ if 'prolog' not in st.session_state:
 # 2. CARGAR DATOS (MDT)
 @st.cache_resource
 def obtener_datos_estables():
-    ruta = os.path.join(os.getcwd(), "datos", "mdt", "MDT02-ETRS89-HU29-0982-3-COB2.tif")
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ruta = os.path.join(BASE_DIR, "datos", "mdt", "MDT02-ETRS89-HU29-0982-3-COB2.tif")
+
+    if not os.path.exists(ruta):
+     st.error(f"No se encuentra el archivo en: {ruta}")
+    st.stop()
     if not os.path.exists(ruta):
         st.error(f"No se encuentra el archivo: {ruta}")
         st.stop()
