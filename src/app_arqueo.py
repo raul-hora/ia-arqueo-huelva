@@ -1,5 +1,16 @@
 import os
 import streamlit as st
+
+# --- TRUCO PARA QUE LA NUBE ENCUENTRE PROLOG ---
+if 'SWI_HOME_DIR' not in os.environ:
+    # Esta es la ruta estándar donde Streamlit instala swi-prolog mediante packages.txt
+    os.environ['SWI_HOME_DIR'] = '/usr/lib/swi-prolog'
+
+# Ahora ya puedes importar pyswip sin que falle
+try:
+    from pyswip import Prolog
+except ImportError:
+    st.error("Error crítico: No se ha podido cargar el motor de Prolog.")
 from streamlit_folium import st_folium
 import folium
 from folium.plugins import MarkerCluster
