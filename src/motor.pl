@@ -4,52 +4,59 @@
 
 % --- MOTOR DE INFERENCIA ARQUEOLOGICA (HUELVA) ---
 
-% 1. YACIMIENTOS DE REFERENCIA
+% 1. YACIMIENTOS DE REFERENCIA (Conocimiento Base)
 yacimiento('Dolmen de Soto', 37.35, -6.82, 'arcilloso', 'Prehistoria').
 yacimiento('Cista de Niebla', 37.36, -6.68, 'calizo', 'Bronce').
 yacimiento('Villa de San Walabonso', 37.39, -6.85, 'ferruginoso', 'Romana').
 
-% 2. GEOLOGIA
+% 2. GEOLOGIA Y PREFERENCIAS
 terreno(37.30, 37.45, -6.90, -6.70, 'arcilloso').
 preferencia('Romana', 'arcilloso').
 preferencia('Prehistoria', 'calizo').
 
-% 3. REGLAS DE ALTA PRIORIDAD (HALLAZGOS Y ESTRUCTURAS)
+% 3. REGLAS DE ALTA PRIORIDAD (HALLAZGOS ESPECÍFICOS)
 
-% Regla 1: Prioridad por hallazgo manual del usuario
-interpretar(P, A, 'Muy Alta', Epoca, Explicacion) :-
+% Regla de Ladrillo/Tégula: Indica construcción (Villa o Alfar)
+interpretar(P, A, 'Muy Alta', 'Asentamiento Romano', 'Confirmado por tegulas (ladrillo): Indica presencia de techumbre o muros.') :-
     hallazgo_registrado(P, A, Tipo),
-    Epoca = 'Confirmada por Hallazgo',
-    atom_concat('Restos encontrados: ', Tipo, Explicacion), !.
+    (Tipo = 'tegula_ladrillo'; Tipo = 'Estructura/Muro'), !.
 
-% Regla 2: DETECCION DE ESTRUCTURAS (Irregularidades en el LiDAR)
-% Si la pendiente cambia bruscamente en una zona llana (P < 5), es una anomalía
-interpretar(P, A, 'Alta', 'Estructura Potencial', 'Anomalia detectada: El relieve indica una posible cimentacion o muro enterrado.') :-
-    P > 15, A > 10, % Un "salto" de relieve (pendiente alta local)
-    P < 45,         % Pero no es un barranco natural (pendiente extrema)
-    terreno(_, _, _, _, 'arcilloso'), !.
+% Regla de Moneda: Indica actividad económica o paso
+interpretar(P, A, 'Alta', 'Zona de Actividad Romana', 'Confirmado por moneda: Posible zona de transito o pequeña ocupacion.') :-
+    hallazgo_registrado(P, A, 'Moneda'), !.
 
-% 4. REGLAS DE ANALOGIA
-interpretar(P, _, 'Alta', 'Sugerida por Analogia', 'Zona similar a tus hallazgos anteriores.') :-
-    hallazgo_registrado(P_ant, _, _),
-    abs(P - P_ant) < 0.5, !.
+% 4. DETECCION DE ESTRUCTURAS (Anomalías Geométricas)
+% Los romanos nivelaban el terreno. Un "escalon" en zona llana es sospechoso.
+interpretar(P, A, 'Alta', 'Cimentacion Enterrada', 'Anomalia detectada: El relieve artificial sugiere una estructura soterrada en terreno arcilloso.') :-
+    P > 12, P < 35, % Pendiente fuera de lo común para el entorno
+    A > 20,
+    preferencia('Romana', 'arcilloso'), !.
 
-% 5. REGLAS GENERALES (PATRONES DE ASENTAMIENTO)
+% 5. REGLAS DE ANALOGÍA (APRENDIZAJE)
+% Si encontraste monedas en una pendiente similar, esta zona es sospechosa.
+interpretar(P, _, 'Alta', 'Sugerida por Analogia', 'Patron de relieve identico a tus hallazgos anteriores de monedas.') :-
+    hallazgo_registrado(P_ant, _, 'Moneda'),
+    abs(P - P_ant) < 0.3, !.
+
+% 6. PATRONES DE INGENIERÍA ROMANA (GENERAL)
 interpretar(P, A, Prob, Epoca, Explicacion) :-
-    terreno(37.30, 37.45, -6.90, -6.70, TipoSuelo),
     (
-        % Patron Romano (Llanuras fertiles)
-        (P < 3, A > 10, A < 80, preferencia('Romana', TipoSuelo)) -> 
-        (Prob = 'Alta', Epoca = 'Romana', Explicacion = 'Terreno optimo para villa agricola o calzada.');
+        % Villa Romana: Pendiente casi nula (< 3%) y suelo arcilloso (fertil)
+        (P < 3, A < 90, preferencia('Romana', 'arcilloso')) -> 
+        (Prob = 'Alta', Epoca = 'Romana', Explicacion = 'Llanura arcillosa fertil: Ubicacion tipica de villae agricolas.');
         
-        % Patron Prehistorico (Lomas y visibilidad)
-        (P >= 3, P < 8, A > 40, A < 120) -> 
-        (Prob = 'Media-Alta', Epoca = 'Prehistoria', Explicacion = 'Ubicacion en loma con dominio del paisaje.');
+        % Camino/Calzada: Pendiente suave y constante
+        (P >= 3, P < 6, A < 150) -> 
+        (Prob = 'Media', Epoca = 'Romana/Comercial', Explicacion = 'Pendiente constante: Perfil compatible con trazados de calzadas secundarias.');
         
-        % Caso por defecto
-        (Prob = 'Baja', Epoca = 'Ninguna', Explicacion = 'Relieve natural sin patrones arqueologicos claros.')
+        % Patron Prehistorico
+        (P >= 6, P < 12, A > 40) -> 
+        (Prob = 'Media-Alta', Epoca = 'Prehistoria', Explicacion = 'Ubicacion en loma: Estrategia de control visual del valle.');
+        
+        % Por defecto
+        (Prob = 'Baja', Epoca = 'Ninguna', Explicacion = 'Relieve natural compatible con erosion estandar.')
     ).
 
-% Regla de seguridad para evitar errores de existencia
+% Predicados de seguridad
 hallazgo_registrado(-1, -1, 'ninguno').
 hecho_confirmado(-1, -1, 'no').
