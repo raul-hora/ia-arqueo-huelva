@@ -8,6 +8,8 @@ import numpy as np
 from pyproj import Transformer
 from pyswip import Prolog
 import json
+if 'DYLD_LIBRARY_PATH' not in os.environ:
+    os.environ['SWI_HOME_DIR'] = '/usr/lib/swi-prolog'
 from scipy.ndimage import gaussian_gradient_magnitude
 
 # --- CONFIGURACIÓN DE PÁGINA ---
