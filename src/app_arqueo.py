@@ -8,6 +8,28 @@ from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster, LocateControl
 from pyproj import Transformer
 from scipy.ndimage import gaussian_gradient_magnitude
+import geopandas as gpd  # Nueva librería para hidrografía
+from shapely.geometry import Point # Para cálculos espaciales
+
+# --- Función para cargar la red hídrica ---
+@st.cache_resource
+def cargar_hidrografia():
+    try:
+        # Intentamos cargar la capa de líneas (ríos)
+        ruta_rios = "datos/vectores/hidrografia/BTN0302L_RIO.shp"
+        if os.path.exists(ruta_rios):
+            rios = gpd.read_file(ruta_rios)
+            # Aseguramos que use coordenadas geográficas (WGS84)
+            rios = rios.to_crs(epsg=4326)
+            return rios
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error al cargar ríos: {e}")
+        return None
+
+# Llamamos a la función al inicio
+gdf_rios = cargar_hidrografia()
 
 # --- 1. CONFIGURACIÓN DE ENTORNO PARA PROLOG ---
 if 'SWI_HOME_DIR' not in os.environ:
@@ -58,8 +80,7 @@ if 'prolog' not in st.session_state:
     except Exception as e:
         st.error(f"Error al inicializar Prolog: {e}")
 
-# --- 5. LÓGICA MULTIZONA Y SELECCIÓN (CORREGIDO) ---
-
+# --- 5. LÓGICA MULTIZONA Y SELECCIÓN ---
 @st.cache_resource
 def obtener_datos_estables(nombre_archivo):
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,7 +91,6 @@ def obtener_datos_estables(nombre_archivo):
         st.stop()
         
     with rasterio.open(ruta) as ds:
-        # Reducción de resolución al 50% para optimizar RAM
         alt = ds.read(1, out_shape=(ds.height // 2, ds.width // 2), 
                       resampling=rasterio.enums.Resampling.bilinear)
         alt[alt < -100] = np.mean(alt[alt > -100])
@@ -85,7 +105,6 @@ def obtener_datos_estables(nombre_archivo):
         
         return alt, pend, ds.transform, ds.crs, (lt, ln), ds.height//2, ds.width//2, to_utm, to_latlon
 
-# Buscador automático y definición de variables ANTES de la carga
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 carpeta_mdt = os.path.join(BASE_DIR, "datos", "mdt")
 mapas_encontrados = [f for f in os.listdir(carpeta_mdt) if f.endswith('.tif')]
@@ -93,22 +112,23 @@ mapas_encontrados = [f for f in os.listdir(carpeta_mdt) if f.endswith('.tif')]
 with st.sidebar:
     st.header("Configuración de Zona")
     if mapas_encontrados:
-        # Aquí se define mapa_seleccionado para que el resto del código lo vea
         mapa_seleccionado = st.selectbox("Seleccionar Hoja MDT", mapas_encontrados)
-        
         st.divider()
-        st.subheader("Sensibilidad del Escáner")
-        # Slider para recuperar la precisión perdida
-        precision = st.slider("Densidad de análisis (paso)", 50, 500, 200, 50)
-        st.caption("Bajo = Más puntos (lento). Alto = Menos puntos (rápido).")
+        st.subheader("Análisis de Campo")
+        precision = st.slider("Densidad de escaneo (paso)", 50, 500, 200, 50)
+        
+        # Nueva visualización: Mostrar si los ríos están cargados
+        if gdf_rios is not None:
+            st.success("🛰️ Capa de Hidrografía activa")
+        else:
+            st.warning("⚠️ Sin datos de ríos")
     else:
-        st.error("No se encontraron archivos .tif en datos/mdt")
+        st.error("No se encontraron archivos .tif")
         st.stop()
 
-# Ahora sí, cargamos los datos usando la variable seleccionada
 alt, pend, trans, crs, centro, h, w, to_utm, to_latlon = obtener_datos_estables(mapa_seleccionado)
 
-# --- 6. INTERFAZ EN COLUMNAS ---
+# --- 6. INTERFAZ ---
 col_mapa, col_info = st.columns([3, 1])
 
 with col_mapa:
@@ -121,44 +141,42 @@ with col_mapa:
 
     cluster = MarkerCluster(name="Predicciones IA").add_to(m)
 
+    # Marcadores de hallazgos guardados
     for p in st.session_state.puntos_confirmados:
         folium.Marker(
             location=[p['lat'], p['lon']], 
-            icon=folium.Icon(color="green", icon="star"),
-            popup=f"Hallazgo: {p.get('hallazgo', 'Verificado')}"
+            icon=folium.Icon(color="green", icon="star")
         ).add_to(m)
 
-    # Usamos la variable precision controlada por ti
+    # Escaneo automático (IA actual)
     paso = precision 
     for f in range(0, h, paso):
         for c in range(0, w, paso):
             a_p, p_p = alt[f, c], pend[f, c]
-            query = f"interpretar({p_p:.2f}, {a_p:.2f}, Pr, E, Ex)"
+            # Como el escáner no calcula distancia para cada punto (sería muy lento), le pasamos un 9999 (lejos)
+            query = f"interpretar({p_p:.2f}, {a_p:.2f}, 9999, Pr, E, Ex)"
             try:
                 q = st.session_state.prolog.query(query)
                 res = list(q); q.close()
                 if res and res[0]["Pr"] in ['Alta', 'Media-Alta', 'Muy Alta']:
-                    # Multiplicamos por 2 para compensar la reducción de resolución anterior
                     x_m = trans[2] + (c * 2) * trans[0]
                     y_m = trans[5] + (f * 2) * trans[4]
-                    lon, lat = to_latlon.transform(x_m, y_m)
+                    lon_p, lat_p = to_latlon.transform(x_m, y_m)
                     folium.Marker(
-                        location=[lat, lon], 
+                        location=[lat_p, lon_p], 
                         icon=folium.Icon(color="red", icon="info-sign"),
-                        popup=f"<b>IA: {res[0]['E']}</b>"
+                        popup=f"IA: {res[0]['E']}"
                     ).add_to(cluster)
             except: continue
 
     folium.LayerControl().add_to(m)
     output = st_folium(
-    m, 
-    width=900, 
-    height=600, 
-    key=f"mapa_{mapa_seleccionado}", 
-    returned_objects=["last_clicked", "last_object_clicked"]
-)
+        m, width=900, height=600, 
+        key=f"mapa_{mapa_seleccionado}", 
+        returned_objects=["last_clicked", "last_object_clicked"]
+    )
 
-# --- 7. PANEL DE CONTROL ---
+# --- 7. PANEL DE CONTROL E INTELIGENCIA HÍDRICA ---
 punto_analizar = None
 if output:
     if output.get("last_object_clicked"): punto_analizar = output["last_object_clicked"]
@@ -168,11 +186,29 @@ with col_info:
     st.subheader("Panel de Control")
     if punto_analizar:
         lat_c, lon_c = punto_analizar["lat"], punto_analizar["lng"]
+        
+        # --- CÁLCULO DISTANCIA AL AGUA (CORREGIDO PROFESIONAL) ---
+       # --- CÁLCULO DISTANCIA AL AGUA (CORREGIDO Y SIN ERRORES) ---
+        distancia_agua = 9999  # Valor por defecto
+        
+        if gdf_rios is not None:
+            try:
+                # 1. Creamos el punto con el clic (WGS84)
+                punto_geo = gpd.GeoSeries([Point(lon_c, lat_c)], crs="EPSG:4326")
+                
+                # 2. Proyectamos a metros (UTM 30N para Huelva) para que la distancia sea real
+                punto_metros = punto_geo.to_crs(epsg=25830)
+                rios_metros = gdf_rios.to_crs(epsg=25830)
+                
+                # 3. Calculamos la distancia mínima en metros
+                distancia_agua = rios_metros.distance(punto_metros.iloc[0]).min()
+            except Exception as e:
+                st.sidebar.error(f"Error en cálculo hídrico: {e}")
+        
         try:
             x_u, y_u = to_utm.transform(lon_c, lat_c)
             from rasterio.transform import rowcol
             row, col = rowcol(trans, x_u, y_u)
-            
             row_red, col_red = row // 2, col // 2
 
             if 0 <= row_red < h and 0 <= col_red < w:
@@ -180,40 +216,42 @@ with col_info:
                 v_pend = pend[row_red, col_red]
 
                 st.markdown("---")
-                st.write(f"**Coordenadas:** `{lat_c:.5f}, {lon_c:.5f}`")
-                query = f"interpretar({v_pend:.2f}, {v_alt:.2f}, Pr, E, Ex)"
+                st.write(f"📍 `{lat_c:.5f}, {lon_c:.5f}`")
+                
+                # Mostramos la nueva métrica en el panel
+                if distancia_agua < 1000:
+                    st.write(f"💧 **Distancia al río:** {distancia_agua:.0f} metros")
+                else:
+                    st.write(f"💧 **Distancia al río:** >1 km")
+
+                # Consulta a Prolog (Próximo paso: pasar distancia_agua a Prolog)
+               # Busca esta línea y cámbiala (añade distancia_agua)
+                query = f"interpretar({v_pend:.2f}, {v_alt:.2f}, {distancia_agua:.2f}, Pr, E, Ex)"
                 q = st.session_state.prolog.query(query)
                 res = list(q); q.close()
                 
                 if res:
                     st.metric("Probabilidad", res[0]['Pr'])
-                    st.write(f"**Época Sugerida:** {res[0]['E']}")
                     st.info(f"**Análisis:** {res[0]['Ex']}")
                     st.write(f"⛰️ {v_alt:.1f}m | 📐 {v_pend:.1f}%")
 
                 st.markdown("### 🏺 Registrar Hallazgo")
-                tipo_resto = st.selectbox("¿Qué has encontrado?", 
-                    ["Ceramica Romana", "Tegula (Ladrillo)", "Silex/Piedra tallada", "Estructura/Muro", "Moneda", "Otro"])
-                comentario = st.text_input("Nota adicional")
-
-                if st.button("✅ Confirmar y Entrenar IA"):
+                tipo_resto = st.selectbox("Hallazgo:", ["Ceramica Romana", "Tegula (Ladrillo)", "Moneda", "Estructura/Muro", "Otro"])
+                
+                if st.button("✅ Guardar"):
                     nuevo_p = {'lat': lat_c, 'lon': lon_c, 'a': float(v_alt), 'p': float(v_pend), 'hallazgo': tipo_resto}
-                    if nuevo_p not in st.session_state.puntos_confirmados:
-                        st.session_state.puntos_confirmados.append(nuevo_p)
-                        guardar_punto_disco(nuevo_p)
-                        hallazgo_pl = tipo_resto.replace(" ", "_").lower()
-                        st.session_state.prolog.assertz(f"hallazgo_registrado({v_pend:.2f}, {v_alt:.2f}, '{hallazgo_pl}')")
-                        st.session_state.prolog.assertz(f"hecho_confirmado({v_pend:.2f}, {v_alt:.2f}, 'Si')")
-                        st.success("¡Punto guardado!")
-                        st.rerun()
+                    st.session_state.puntos_confirmados.append(nuevo_p)
+                    guardar_punto_disco(nuevo_p)
+                    st.success("Guardado localmente")
+                    st.rerun()
             else:
-                st.warning("Fuera de límites.")
+                st.warning("Fuera de mapa.")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error técnico: {e}")
     else:
-        st.write("Haz click en el mapa.")
+        st.write("Selecciona un punto en el mapa para analizar.")
 
-    if st.button("🗑️ Resetear Memoria IA"):
+    if st.button("🗑️ Reset"):
         if os.path.exists(DB_PUNTOS): os.remove(DB_PUNTOS)
         st.session_state.puntos_confirmados = []
         st.rerun()
