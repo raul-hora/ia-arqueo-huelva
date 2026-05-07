@@ -150,8 +150,13 @@ with col_mapa:
             except: continue
 
     folium.LayerControl().add_to(m)
-    output = st_folium(m, width=900, height=600, key=f"mapa_{mapa_seleccionado}", 
-                       returned_objects=["last_clicked", "last_object_clicked"])
+    output = st_folium(
+    m, 
+    width=900, 
+    height=600, 
+    key=f"mapa_{mapa_seleccionado}", 
+    returned_objects=["last_clicked", "last_object_clicked"]
+)
 
 # --- 7. PANEL DE CONTROL ---
 punto_analizar = None
