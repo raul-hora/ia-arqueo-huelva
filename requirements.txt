@@ -6,3 +6,5 @@ numpy==1.26.4
 pyproj
 pyswip
 scipy
+geopandas
+shapely
